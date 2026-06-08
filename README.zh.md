@@ -32,6 +32,23 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+### 从本 fork 源码安装
+
+本 fork 增加了按群的 `/receive` 接收模式（`mention` / `all` / `smart`）以及
+bridge 提示词约定，官方 npm 包暂时还没有。要用它，从源码构建并全局安装 CLI：
+
+```bash
+git clone https://github.com/kennyzheng-builds/lark-coding-agent-bridge.git
+cd lark-coding-agent-bridge
+npm install
+npm install -g .        # 通过 prepare 自动 build 并安装 `lark-channel-bridge` 命令
+```
+
+然后照着 [首次启动](#首次启动)（`lark-channel-bridge config init`）和
+[后台运行](#后台运行) 走，跟 npm 安装完全一样——后面步骤没有区别。**你接到 bridge
+上的每个 agent 都会自动获得 bridge 的 system prompt 约定**（怎么 @、用卡片、处理授权
+等），不用每个 agent 单独配置。
+
 ## 首次启动
 
 ```bash

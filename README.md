@@ -32,6 +32,25 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+### Install from this fork (source)
+
+This fork adds the per-chat `/receive` receive mode (`mention` / `all` /
+`smart`) and bridge-prompt conventions that aren't in the published npm package
+yet. To run it, build from source and install the CLI globally:
+
+```bash
+git clone https://github.com/kennyzheng-builds/lark-coding-agent-bridge.git
+cd lark-coding-agent-bridge
+npm install
+npm install -g .        # builds (via prepare) and installs the `lark-channel-bridge` CLI
+```
+
+Then continue with [First run](#first-run) (`lark-channel-bridge config init`)
+and [Background service](#background-service) exactly as for the npm install —
+everything downstream is identical. Each agent you run through the bridge
+automatically receives the bridge's system-prompt conventions (how to @-mention,
+use cards, handle auth, etc.), so there's no per-agent setup.
+
 ## First run
 
 ```bash
