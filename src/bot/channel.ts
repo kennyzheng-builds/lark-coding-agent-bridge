@@ -23,6 +23,7 @@ import {
   markIdleTimeout,
   markInterrupted,
   reduce,
+  type Block,
   type RunState,
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
@@ -32,7 +33,7 @@ import {
   getAgentStopGraceMs,
   getMaxConcurrentRuns,
   getMessageReplyMode,
-  getRequireMentionInGroup,
+  getReceiveMode,
   getRunIdleTimeoutMs,
   getShowToolCalls,
 } from '../config/schema';
@@ -552,14 +553,15 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   }
 
   // Group-mention policy. p2p is always unrestricted; in groups (regular and
-  // topic) we drop messages that don't @bot when the user has opted into the
-  // quiet-by-default behavior. Slash commands are NOT exempt — the user
-  // chose strict mode so the group stays uniformly quiet unless mentioned.
-  // @全员 is already filtered by SDK (`respondToMentionAll: false`), so any
-  // event reaching here is either targeted or undirected chatter.
+  // topic) we drop messages that don't @bot when the chat's receive mode is
+  // 'mention'. Slash commands are NOT exempt — the user chose strict mode so
+  // the group stays uniformly quiet unless mentioned. In 'all' and 'smart'
+  // modes un-mentioned messages are let through (smart lets the agent decide
+  // whether to reply — see runAgentBatch). @全员 is already filtered by the
+  // SDK (`respondToMentionAll: false`).
   if (
     msg.chatType !== 'p2p' &&
-    getRequireMentionInGroup(controls.cfg) &&
+    getReceiveMode(controls.cfg, msg.chatId) === 'mention' &&
     !msg.mentionedBot
   ) {
     log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
@@ -596,6 +598,42 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
 
   const size = pending.push(scope, msg);
   log.info('intake', 'queued', { scope, queueSize: size, debounceMs: DEBOUNCE_MS });
+}
+
+/**
+ * Sentinel the agent emits in 'smart' mode to decline replying to a message
+ * that didn't @-mention it. Nothing is posted to the chat (the transient
+ * "Typing" ack reaction is cleared), but the message still lands in the
+ * session history so it becomes context for later turns.
+ */
+const SMART_SILENT_MARKER = '[[silent]]';
+
+/** Instruction appended to the prompt for a 'smart'-mode un-mentioned batch. */
+const SMART_EVAL_HINT = [
+  '',
+  '---',
+  '【群消息 · 没有 @ 你】上面这条/这些群消息没有点名你。请像群里的一个普通成员那样判断：现在需要你主动开口吗？',
+  `- 不需要（闲聊、自言自语、与你无关、对方已自行解决、还没轮到你）：只输出 \`${SMART_SILENT_MARKER}\`，不要有任何其它内容。`,
+  '- 需要（在叫你、问题和你相关、你能实质帮上忙、有人等你跟进）：正常回复即可。',
+  '无论你这次是否开口，这些消息都会进入对话上下文，之后被叫到时你都能看到。',
+].join('\n');
+
+/**
+ * True when a smart-mode evaluation chose NOT to chime in: the agent's text
+ * output is empty or just the silence sentinel. Only the agent's TEXT blocks
+ * count — tool-call blocks are deliberately ignored, since `renderText` also
+ * renders tool lines (`> ✅ **Read** — …`) when showToolCalls is on (the
+ * default), so a tool-using-but-silent eval would otherwise look non-silent
+ * and leak the tool trace into the chat. Tolerates surrounding whitespace /
+ * backticks / bold so a slightly-formatted marker still counts as silence.
+ */
+export function isSmartSilentEval(state: RunState): boolean {
+  const text = state.blocks
+    .filter((b): b is Extract<Block, { kind: 'text' }> => b.kind === 'text')
+    .map((b) => b.content)
+    .join('');
+  const normalized = text.replace(/[`*\s]/g, '').toLowerCase();
+  return normalized === '' || normalized === SMART_SILENT_MARKER.toLowerCase();
 }
 
 interface RunBatchDeps {
@@ -681,6 +719,20 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const prompt = buildPrompt(batch, attachments, quotes, channel.botIdentity);
   log.info('prompt', 'built', { promptChars: prompt.length, quotes: quotes.length });
 
+  // 'smart' mode: an un-mentioned group batch is a quiet evaluation — the
+  // agent sees the messages and decides whether to chime in, and may stay
+  // silent (no card, no reaction, nothing posted) while the messages still
+  // land in the session as context. A batch that @bot at all is a real
+  // interaction and runs normally.
+  const receiveMode =
+    firstMsg.chatType === 'p2p' ? 'all' : getReceiveMode(controls.cfg, chatId);
+  const batchMentionedBot = batch.some((m) => m.mentionedBot);
+  const quietEval = receiveMode === 'smart' && !batchMentionedBot;
+  const promptForRun = quietEval ? `${prompt}\n${SMART_EVAL_HINT}` : prompt;
+  if (quietEval) {
+    log.info('flush', 'smart-eval', { scope });
+  }
+
   // For topic groups: thread the reply so it lands in the same topic as the
   // user's message. Otherwise the SDK posts at top level and the user's
   // topic discussion breaks visually.
@@ -706,7 +758,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const flow = await startRunFlow({
     scopeId: scope,
     scope: scopeContext,
-    prompt,
+    prompt: promptForRun,
     attachments: attachments.map(toPolicyAttachment),
     access: accessDecision,
     capability,
@@ -802,11 +854,41 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // a first streamed token (markdown mode) or the whole run ends (text mode).
   // Add a "Typing" reaction to the triggering message as an instant ack, but
   // never let that outbound API call block agent event draining.
+  //
+  // A quiet 'smart' evaluation also adds the reaction (it has no card to show
+  // it's working) so the user sees "TARS saw this and is considering it". The
+  // shared cleanup below removes it once the run ends — whether smart chose to
+  // reply or to stay silent — so a silent eval just flashes the ack and clears.
   const reactionPromise =
-    replyMode === 'card' ? undefined : addWorkingReaction(channel, lastMsg.messageId);
+    quietEval
+      ? addWorkingReaction(channel, lastMsg.messageId)
+      : replyMode === 'card'
+        ? undefined
+        : addWorkingReaction(channel, lastMsg.messageId);
 
   try {
-    if (replyMode === 'card') {
+    if (quietEval) {
+      // No live card: drain the run into a buffered RunState, then post only if
+      // the agent chose to chime in. The "Typing" ack reaction (added above)
+      // is removed by the shared cleanup when the run ends, so a silent eval
+      // just flashes the ack and leaves no message. Either way the messages are
+      // already in the session via recordSession, so they stay as context.
+      const finalState = await processAgentStream(
+        handle,
+        eventStream,
+        scope,
+        idleTimeoutMs,
+        recordSession,
+        async () => {},
+      );
+      if (finalState.terminal === 'done' && !isSmartSilentEval(finalState)) {
+        const body = renderText(filterForPrefs(finalState));
+        await channel.send(chatId, { markdown: body }, sendOpts);
+        log.info('flush', 'smart-reply', { scope, chars: body.length });
+      } else {
+        log.info('flush', 'smart-silent', { scope, terminal: finalState.terminal });
+      }
+    } else if (replyMode === 'card') {
       let latestState: RunState = initialState;
       let producerStarted = false;
       let cardCtrl:
