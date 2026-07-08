@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { claudeCapability, codexCapability } from '../agent/capability';
-import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
+import { DEFAULT_MODEL, modelLabel, normalizeModelSelection, supportedModels } from '../agent/models';
 import type { AgentAdapter } from '../agent/types';
 import type { ActiveRuns } from '../bot/active-runs';
 import {
@@ -43,7 +43,7 @@ import {
   getShowToolCalls,
   secretKeyForApp,
 } from '../config/schema';
-import type { ProfileAccess, ProfileConfig } from '../config/profile-schema';
+import type { AgentKind, ProfileAccess, ProfileConfig } from '../config/profile-schema';
 import { resolveAppPaths } from '../config/app-paths';
 import { accessToClaudePermissionMode } from '../config/permissions';
 import {
@@ -177,6 +177,7 @@ const handlers: Record<string, Handler> = {
   '/account': handleAccount,
   '/config': handleConfig,
   '/receive': handleReceive,
+  '/runtime': handleRuntime,
   '/stop': handleStop,
   '/timeout': handleTimeout,
   '/ps': handlePs,
@@ -197,6 +198,7 @@ const ADMIN_COMMANDS = new Set([
   '/account',
   '/config',
   '/receive',
+  '/runtime',
   '/ps',
   '/exit',
   '/reconnect',
@@ -2227,6 +2229,72 @@ async function handleReceive(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
   await reply(ctx, `✅ 本群已设为：**${describeReceiveMode(target)}**`);
+}
+
+/**
+ * `/runtime` — switch this profile's agent runtime (claude ⇄ codex) from chat.
+ * The agent adapter is built once at daemon start, so a switch persists the new
+ * `agentKind` and then bounces the process: under the launchd KeepAlive daemon
+ * `controls.exit()` → `process.exit()` → relaunch with the new runtime. Admin-only.
+ */
+async function handleRuntime(args: string, ctx: CommandContext): Promise<void> {
+  const current = ctx.controls.profileConfig.agentKind;
+  const modelSel = normalizeModelSelection(current, ctx.controls.cfg.preferences?.model);
+  const sub = args.trim().toLowerCase();
+  const usage =
+    '\n\n用法:\n' +
+    '- `/runtime claude` 切到 Claude Code\n' +
+    '- `/runtime codex` 切到 Codex\n' +
+    '- `/runtime` 查看当前 runtime';
+
+  if (sub === '' || sub === 'status') {
+    await reply(
+      ctx,
+      `🧩 当前 runtime：**${current}**｜模型：${modelLabel(current, modelSel)}${usage}`,
+    );
+    return;
+  }
+
+  if (sub !== 'claude' && sub !== 'codex') {
+    await reply(ctx, `未知参数 \`${sub}\`。${usage}`);
+    return;
+  }
+  const target = sub as AgentKind;
+  if (target === current) {
+    await reply(ctx, `ℹ️ 当前已经是 **${target}**，无需切换。`);
+    return;
+  }
+
+  await setAgentKind(ctx, target);
+  log.info('command', 'runtime-set', { profile: ctx.controls.profile, agentKind: target });
+
+  // Persist done — tell the user, then bounce so the new adapter is built on relaunch.
+  await reply(
+    ctx,
+    `✅ 已切到 **${target}**，正在重启使其生效（约几秒重连）。切换后当前对话从新会话开始。`,
+  );
+  void (async () => {
+    await new Promise((r) => setTimeout(r, 400));
+    await ctx.controls.exit().catch(() => {});
+  })();
+}
+
+/** Persist a profile's agentKind (+ minimal codex bootstrap when needed). */
+async function setAgentKind(ctx: CommandContext, kind: AgentKind): Promise<void> {
+  await withConfigFileLock(ctx.controls.configPath, async () => {
+    const root = await loadRootConfig(ctx.controls.configPath);
+    if (!root) throw new Error('runtime switch requires a v2 profile config');
+    const profile = root.profiles[ctx.controls.profile];
+    if (!profile) throw new Error(`profile not found: ${ctx.controls.profile}`);
+    const next: ProfileConfig = { ...profile, agentKind: kind };
+    if (kind === 'codex' && !next.codex) {
+      next.codex = { binaryPath: process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex' };
+    }
+    root.profiles[ctx.controls.profile] = next;
+    await saveRootConfig(root, ctx.controls.configPath);
+    ctx.controls.profileConfig = root.profiles[ctx.controls.profile]!;
+    ctx.controls.cfg = runtimeProfileConfig(root, ctx.controls.profile);
+  });
 }
 
 /**

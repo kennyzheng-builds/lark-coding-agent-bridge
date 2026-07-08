@@ -6,6 +6,7 @@ import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
+import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
 import { SessionStore } from '../../../src/session/store.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent, type FakeAgentRun } from '../../helpers/fake-agent.js';
@@ -308,6 +309,45 @@ describe('Claude slash command visible behavior', () => {
 
     expect(lastMarkdown(h.channel)).toBe('⏳ 正在停止当前运行并重连…');
     expect(h.controls.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles /runtime: status, no-op, bad arg, then switch (persist + bounce)', async () => {
+    const h = await createHarness();
+
+    // status — reads agentKind, no config write
+    await expect(h.run('/runtime')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('当前 runtime');
+    expect(lastMarkdown(h.channel)).toContain('claude');
+
+    // already on claude → no-op, no bounce
+    await expect(h.run('/runtime claude')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已经是');
+    expect(h.controls.exit).not.toHaveBeenCalled();
+
+    // unknown runtime → usage
+    await expect(h.run('/runtime gpt')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('用法');
+
+    // switch to codex — needs a v2 root config on disk for setAgentKind to persist
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: h.controls.profileConfig },
+      },
+      h.controls.configPath,
+    );
+    await expect(h.run('/runtime codex')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已切到');
+    expect(h.controls.profileConfig.agentKind).toBe('codex');
+    const saved = await loadRootConfig(h.controls.configPath);
+    expect(saved?.profiles.claude?.agentKind).toBe('codex');
+    expect(saved?.profiles.claude?.codex?.binaryPath).toBeTruthy();
+
+    // the daemon bounce is scheduled ~400ms out (launchd KeepAlive relaunches on exit)
+    await new Promise((r) => setTimeout(r, 500));
+    expect(h.controls.exit).toHaveBeenCalledTimes(1);
   });
 });
 
