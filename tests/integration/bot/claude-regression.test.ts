@@ -57,7 +57,10 @@ describe('Claude IM regression boundaries', () => {
     const source = await readFile(join(process.cwd(), 'src/bot/channel.ts'), 'utf8');
 
     expect(source).toContain('respondToMentionAll: false');
-    expect(source).toContain('getRequireMentionInGroup(controls.cfg)');
+    // Per-chat receive fork: the group-intake gate now resolves via getReceiveMode
+    // (which falls back to getRequireMentionInGroup), still dropping undirected
+    // group chatter in the default 'mention' mode.
+    expect(source).toContain('getReceiveMode(controls.cfg, msg.chatId) === \'mention\'');
     expect(source).toContain('!msg.mentionedBot');
     expect(source).toContain('msg.chatType !== \'p2p\'');
   });
