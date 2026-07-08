@@ -1022,16 +1022,19 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   // 'smart' evaluation adds nothing — it must leave no trace if the agent
   // decides to stay silent.
   const reactionPromise =
-    quietEval || cotEnabled || replyMode === 'card'
-      ? undefined
-      : addWorkingReaction(channel, lastMsg.messageId);
+    quietEval
+      ? addWorkingReaction(channel, lastMsg.messageId)
+      : cotEnabled || replyMode === 'card'
+        ? undefined
+        : addWorkingReaction(channel, lastMsg.messageId);
 
   try {
     if (quietEval) {
-      // Smart mode with no live UI: drain the run into a buffered RunState,
-      // then post only if the agent chose to chime in. Silence (or any
-      // non-clean finish) leaves the chat untouched; the messages are already
-      // in the session via recordSession, so they still serve as context next time.
+      // No live card: drain the run into a buffered RunState, then post only if
+      // the agent chose to chime in. The "Typing" ack reaction (added above) is
+      // removed by the shared cleanup when the run ends, so a silent eval just
+      // flashes the ack and leaves no message. Either way the messages are
+      // already in the session via recordSession, so they stay as context.
       const finalState = await processAgentStream(
         handle,
         eventStream,
