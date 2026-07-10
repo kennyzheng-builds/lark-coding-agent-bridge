@@ -325,6 +325,24 @@ export function modelFormCard(opts: { agentKind: AgentKind; model: string }): ob
   };
 }
 
+/** Done-state card for `/model` — replaces the picker in place after a selection. */
+export function modelSavedCard(opts: { agentKind: AgentKind; model: string }): object {
+  return {
+    schema: '2.0',
+    config: { summary: { content: '模型已切换' } },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          content:
+            `✅ **模型已切到 ${modelLabel(opts.agentKind, opts.model)}**\n\n` +
+            '下一条消息生效。再发 `/model` 可重新选择。',
+        },
+      ],
+    },
+  };
+}
+
 export function configSavedCard(opts: ConfigFormOpts): object {
   const replyLabel =
     opts.messageReply === 'card'

@@ -21,6 +21,7 @@ import {
   groupMsgScopeGrantCard,
   groupMsgScopeGrantedCard,
   modelFormCard,
+  modelSavedCard,
 } from '../card/config-card';
 import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
 import { requestScopeGrantLink } from '../bot/wizard';
@@ -2312,14 +2313,18 @@ async function handleModel(args: string, ctx: CommandContext): Promise<void> {
   const current = normalizeModelSelection(agentKind, ctx.controls.cfg.preferences?.model);
   const sub = args.trim();
 
-  // Card action: the picker's 切换 button submitted a dropdown selection.
+  // Card action: the picker's 切换 button submitted a dropdown selection. Update the picker
+  // card IN PLACE to a done state — no recall (which leaves an ugly "撤回了一条消息" notice).
   if (ctx.fromCardAction && sub.toLowerCase().startsWith('submit')) {
     const picked = String((ctx.formValue ?? {}).model ?? '').trim();
     const model = !picked || picked === DEFAULT_MODEL ? undefined : picked;
     await setModelPref(ctx, model);
     log.info('command', 'model-set', { profile: ctx.controls.profile, model: model ?? 'default', via: 'card' });
-    await recallMessage(ctx, ctx.msg.messageId).catch(() => {});
-    await reply(ctx, `✅ 模型已切到 **${modelLabel(agentKind, picked || DEFAULT_MODEL)}**，下一条消息生效。`);
+    await updateManagedCard(
+      ctx.channel,
+      ctx.msg.messageId,
+      modelSavedCard({ agentKind, model: picked || DEFAULT_MODEL }),
+    ).catch(() => {});
     return;
   }
 
