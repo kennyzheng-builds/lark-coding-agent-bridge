@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
-import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
+import { runCommandHandler, tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
 import { loadRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
 import { SessionStore } from '../../../src/session/store.js';
@@ -350,12 +350,16 @@ describe('Claude slash command visible behavior', () => {
     expect(h.controls.exit).toHaveBeenCalledTimes(1);
   });
 
-  it('handles /model: status, built-in + arbitrary id switch (persist, live, no restart)', async () => {
+  it('handles /model: picker card, direct switch, card submit (persist, live, no restart)', async () => {
     const h = await createHarness();
 
-    // status reads in-memory, works without a config file
+    // `/model` (no arg) → interactive picker card with a model dropdown incl. Fable 5
     await expect(h.run('/model')).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('当前模型');
+    const card = JSON.stringify(h.channel.sent.at(-1));
+    expect(card).toContain('切换模型');
+    expect(card).toContain('select_static');
+    expect(card).toContain('claude-fable-5');
+    expect(card).toContain('model.submit');
 
     // switch persists → needs a v2 root config on disk
     await saveRootConfig(
@@ -368,17 +372,34 @@ describe('Claude slash command visible behavior', () => {
       h.controls.configPath,
     );
 
-    // built-in model value
+    // direct: built-in value
     await expect(h.run('/model claude-opus-4-8')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toContain('已切到');
     expect(h.controls.profileConfig.preferences?.model).toBe('claude-opus-4-8');
-    const saved = await loadRootConfig(h.controls.configPath);
-    expect(saved?.profiles.claude?.preferences?.model).toBe('claude-opus-4-8');
 
-    // arbitrary id not in the built-in list → still accepted, with a note
-    await expect(h.run('/model claude-fable-5')).resolves.toBe(true);
+    // direct: arbitrary id not in the built-in list → still accepted, with a note
+    await expect(h.run('/model claude-custom-x')).resolves.toBe(true);
     expect(lastMarkdown(h.channel)).toContain('不在内置列表');
+    expect(h.controls.profileConfig.preferences?.model).toBe('claude-custom-x');
+
+    // card submit: the dropdown's 切换 button routes here with formValue.model
+    const cardCtx = {
+      channel: h.channel as unknown as CommandContext['channel'],
+      msg: message('/model'),
+      scope: 'chat-1',
+      chatMode: 'p2p',
+      sessions: h.sessions,
+      workspaces: h.workspaces,
+      activeRuns: h.activeRuns,
+      agent: h.agent,
+      controls: h.controls,
+      formValue: { model: 'claude-fable-5' },
+      fromCardAction: true,
+    } as unknown as CommandContext;
+    await runCommandHandler('model', 'submit', cardCtx);
     expect(h.controls.profileConfig.preferences?.model).toBe('claude-fable-5');
+    const saved = await loadRootConfig(h.controls.configPath);
+    expect(saved?.profiles.claude?.preferences?.model).toBe('claude-fable-5');
 
     // default clears the override
     await expect(h.run('/model default')).resolves.toBe(true);

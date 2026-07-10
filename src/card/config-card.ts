@@ -282,6 +282,49 @@ export function configFormCard(opts: ConfigFormOpts): object {
   };
 }
 
+/** Focused picker card for `/model` — a single model dropdown + a 切换 button. */
+export function modelFormCard(opts: { agentKind: AgentKind; model: string }): object {
+  return {
+    schema: '2.0',
+    config: { summary: { content: '选择模型' } },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          content:
+            '🧠 **切换模型**\n\n' +
+            `当前：**${modelLabel(opts.agentKind, opts.model)}**（runtime: ${opts.agentKind}）\n` +
+            '下拉选一个、点「切换」即可（立即生效，下一条消息就用新模型）。',
+        },
+        { tag: 'hr' },
+        {
+          tag: 'form',
+          name: 'model_form',
+          elements: [
+            {
+              tag: 'select_static',
+              name: 'model',
+              initial_option: opts.model,
+              options: supportedModels(opts.agentKind).map((m) => ({
+                text: { tag: 'plain_text', content: m.label },
+                value: m.value,
+              })),
+            },
+            {
+              tag: 'button',
+              name: 'model_submit',
+              text: { tag: 'plain_text', content: '切换' },
+              type: 'primary',
+              form_action_type: 'submit',
+              behaviors: [{ type: 'callback', value: { cmd: 'model.submit' } }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 export function configSavedCard(opts: ConfigFormOpts): object {
   const replyLabel =
     opts.messageReply === 'card'

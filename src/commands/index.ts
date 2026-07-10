@@ -20,6 +20,7 @@ import {
   configSavedCard,
   groupMsgScopeGrantCard,
   groupMsgScopeGrantedCard,
+  modelFormCard,
 } from '../card/config-card';
 import { GROUP_MSG_SCOPE, hasGroupMsgScope } from '../bot/app-scope';
 import { requestScopeGrantLink } from '../bot/wizard';
@@ -2310,19 +2311,26 @@ async function handleModel(args: string, ctx: CommandContext): Promise<void> {
   const models = supportedModels(agentKind);
   const current = normalizeModelSelection(agentKind, ctx.controls.cfg.preferences?.model);
   const sub = args.trim();
-  const known = models.map((m) => `- \`${m.value}\` ${m.label}`).join('\n');
-  const usage =
-    '\n\n用法:\n' +
-    '- `/model <模型>` 切换（可填内置列表值，或任意完整 model id）\n' +
-    '- `/model default` 用 CLI 默认\n' +
-    '- `/model` 查看当前 + 可选\n\n' +
-    `当前 runtime **${agentKind}** 内置可选（也可填其它 id）:\n${known}`;
 
-  if (sub === '' || sub.toLowerCase() === 'status') {
-    await reply(ctx, `🧠 当前模型：**${modelLabel(agentKind, current)}**${usage}`);
+  // Card action: the picker's 切换 button submitted a dropdown selection.
+  if (ctx.fromCardAction && sub.toLowerCase().startsWith('submit')) {
+    const picked = String((ctx.formValue ?? {}).model ?? '').trim();
+    const model = !picked || picked === DEFAULT_MODEL ? undefined : picked;
+    await setModelPref(ctx, model);
+    log.info('command', 'model-set', { profile: ctx.controls.profile, model: model ?? 'default', via: 'card' });
+    await recallMessage(ctx, ctx.msg.messageId).catch(() => {});
+    await reply(ctx, `✅ 模型已切到 **${modelLabel(agentKind, picked || DEFAULT_MODEL)}**，下一条消息生效。`);
     return;
   }
 
+  // `/model` or `/model status` → interactive picker card (a dropdown, like /config).
+  if (sub === '' || sub.toLowerCase() === 'status') {
+    const card = modelFormCard({ agentKind, model: current });
+    await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
+    return;
+  }
+
+  // `/model default` / `/model <id>` → direct text path (accepts any model id).
   const isDefault = sub.toLowerCase() === 'default' || sub === '默认';
   const raw = isDefault ? DEFAULT_MODEL : sub;
   const model = raw === DEFAULT_MODEL ? undefined : raw;
