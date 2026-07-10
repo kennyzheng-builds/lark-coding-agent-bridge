@@ -349,6 +349,44 @@ describe('Claude slash command visible behavior', () => {
     await new Promise((r) => setTimeout(r, 500));
     expect(h.controls.exit).toHaveBeenCalledTimes(1);
   });
+
+  it('handles /model: status, built-in + arbitrary id switch (persist, live, no restart)', async () => {
+    const h = await createHarness();
+
+    // status reads in-memory, works without a config file
+    await expect(h.run('/model')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('当前模型');
+
+    // switch persists → needs a v2 root config on disk
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: h.controls.profileConfig },
+      },
+      h.controls.configPath,
+    );
+
+    // built-in model value
+    await expect(h.run('/model claude-opus-4-8')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已切到');
+    expect(h.controls.profileConfig.preferences?.model).toBe('claude-opus-4-8');
+    const saved = await loadRootConfig(h.controls.configPath);
+    expect(saved?.profiles.claude?.preferences?.model).toBe('claude-opus-4-8');
+
+    // arbitrary id not in the built-in list → still accepted, with a note
+    await expect(h.run('/model claude-fable-5')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('不在内置列表');
+    expect(h.controls.profileConfig.preferences?.model).toBe('claude-fable-5');
+
+    // default clears the override
+    await expect(h.run('/model default')).resolves.toBe(true);
+    expect(h.controls.profileConfig.preferences?.model).toBeUndefined();
+
+    // model changes apply live — never bounce the daemon
+    expect(h.controls.exit).not.toHaveBeenCalled();
+  });
 });
 
 async function createHarness(): Promise<Harness> {

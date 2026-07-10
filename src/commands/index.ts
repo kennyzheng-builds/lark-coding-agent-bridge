@@ -178,6 +178,7 @@ const handlers: Record<string, Handler> = {
   '/config': handleConfig,
   '/receive': handleReceive,
   '/runtime': handleRuntime,
+  '/model': handleModel,
   '/stop': handleStop,
   '/timeout': handleTimeout,
   '/ps': handlePs,
@@ -199,6 +200,7 @@ const ADMIN_COMMANDS = new Set([
   '/config',
   '/receive',
   '/runtime',
+  '/model',
   '/ps',
   '/exit',
   '/reconnect',
@@ -2291,6 +2293,67 @@ async function setAgentKind(ctx: CommandContext, kind: AgentKind): Promise<void>
       next.codex = { binaryPath: process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex' };
     }
     root.profiles[ctx.controls.profile] = next;
+    await saveRootConfig(root, ctx.controls.configPath);
+    ctx.controls.profileConfig = root.profiles[ctx.controls.profile]!;
+    ctx.controls.cfg = runtimeProfileConfig(root, ctx.controls.profile);
+  });
+}
+
+/**
+ * `/model` — switch the model the agent runs with, directly from chat (a one-shot
+ * alternative to the `/config` card's dropdown). Accepts any model id (not just the
+ * built-in list) so new/custom models work without a code change. Applies live — the
+ * next run reads `preferences.model`, no restart needed. Admin-only.
+ */
+async function handleModel(args: string, ctx: CommandContext): Promise<void> {
+  const agentKind = ctx.controls.profileConfig.agentKind;
+  const models = supportedModels(agentKind);
+  const current = normalizeModelSelection(agentKind, ctx.controls.cfg.preferences?.model);
+  const sub = args.trim();
+  const known = models.map((m) => `- \`${m.value}\` ${m.label}`).join('\n');
+  const usage =
+    '\n\n用法:\n' +
+    '- `/model <模型>` 切换（可填内置列表值，或任意完整 model id）\n' +
+    '- `/model default` 用 CLI 默认\n' +
+    '- `/model` 查看当前 + 可选\n\n' +
+    `当前 runtime **${agentKind}** 内置可选（也可填其它 id）:\n${known}`;
+
+  if (sub === '' || sub.toLowerCase() === 'status') {
+    await reply(ctx, `🧠 当前模型：**${modelLabel(agentKind, current)}**${usage}`);
+    return;
+  }
+
+  const isDefault = sub.toLowerCase() === 'default' || sub === '默认';
+  const raw = isDefault ? DEFAULT_MODEL : sub;
+  const model = raw === DEFAULT_MODEL ? undefined : raw;
+  const inList = models.some((m) => m.value === raw);
+
+  await setModelPref(ctx, model);
+  log.info('command', 'model-set', { profile: ctx.controls.profile, model: model ?? 'default' });
+
+  const shown = model ? (inList ? modelLabel(agentKind, raw) : `\`${raw}\``) : 'CLI 默认';
+  const note = model && !inList ? '\n（不在内置列表，按原样传给 CLI —— 确认模型名正确且有额度）' : '';
+  await reply(ctx, `✅ 模型已切到 **${shown}**，下一条消息生效。${note}`);
+}
+
+/** Persist a profile's `preferences.model` (undefined = follow CLI default). Applies live. */
+async function setModelPref(ctx: CommandContext, model: string | undefined): Promise<void> {
+  await withConfigFileLock(ctx.controls.configPath, async () => {
+    const root = await loadRootConfig(ctx.controls.configPath);
+    const setModel = (prefs: AppPreferences): AppPreferences => {
+      const next = { ...prefs };
+      if (model === undefined) delete next.model;
+      else next.model = model;
+      return next;
+    };
+    if (!root) {
+      ctx.controls.cfg.preferences = setModel(ctx.controls.cfg.preferences ?? {});
+      await saveConfig(ctx.controls.cfg, ctx.controls.configPath);
+      return;
+    }
+    const profile = root.profiles[ctx.controls.profile];
+    if (!profile) throw new Error(`profile not found: ${ctx.controls.profile}`);
+    root.profiles[ctx.controls.profile] = { ...profile, preferences: setModel(profile.preferences ?? {}) };
     await saveRootConfig(root, ctx.controls.configPath);
     ctx.controls.profileConfig = root.profiles[ctx.controls.profile]!;
     ctx.controls.cfg = runtimeProfileConfig(root, ctx.controls.profile);

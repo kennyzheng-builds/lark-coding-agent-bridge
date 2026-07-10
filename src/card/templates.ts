@@ -193,6 +193,7 @@ export function helpCard(agentName = 'Agent'): object {
         '- `/config` — 调整偏好、访问控制和 lark-cli 身份策略',
         '- `/receive all|smart|mention|default` — 本群接收模式：全回 / 智能判断 / 必须@ / 跟随全局（管理员，仅群聊）',
         '- `/runtime claude|codex` — 切换 agent runtime，切完自动重启生效（管理员）',
+        '- `/model <模型>` — 切换模型（内置值或任意 model id，立即生效；管理员）',
         '- `/status` — 当前状态',
         '- `/stop` — 结束当前正在跑的任务（也可点卡片底部 ⏹ 终止 按钮）',
         '- `/stop comment:<scopeHash>` — 管理员停止云文档评论任务',
