@@ -408,6 +408,61 @@ describe('Claude slash command visible behavior', () => {
     // model changes apply live — never bounce the daemon
     expect(h.controls.exit).not.toHaveBeenCalled();
   });
+
+  it('lets Codex users switch model and reasoning effort in one interactive card', async () => {
+    const h = await createHarness();
+    h.controls.profileConfig.agentKind = 'codex';
+    h.controls.profileConfig.codex = { binaryPath: 'codex' };
+    h.controls.cfg = h.controls.profileConfig;
+    await saveRootConfig(
+      {
+        schemaVersion: 2,
+        activeProfile: 'claude',
+        preferences: {},
+        profiles: { claude: h.controls.profileConfig },
+      },
+      h.controls.configPath,
+    );
+
+    await expect(h.run('/model')).resolves.toBe(true);
+    const card = JSON.stringify(h.channel.sent.at(-1));
+    expect(card).toContain('切换模型与强度');
+    expect(card).toContain('gpt-5.6-sol');
+    expect(card).toContain('reasoning_effort');
+    expect(card).toContain('ultra');
+
+    const cardCtx = {
+      channel: h.channel as unknown as CommandContext['channel'],
+      msg: { ...message('/model'), messageId: 'om_fake_1' },
+      scope: 'chat-1',
+      chatMode: 'p2p',
+      sessions: h.sessions,
+      workspaces: h.workspaces,
+      activeRuns: h.activeRuns,
+      agent: h.agent,
+      controls: h.controls,
+      formValue: {
+        model: 'gpt-5.6-sol',
+        reasoning_effort: 'high',
+      },
+      fromCardAction: true,
+    } as unknown as CommandContext;
+    await runCommandHandler('model', 'submit', cardCtx);
+
+    expect(h.controls.profileConfig.preferences).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'high',
+    });
+    const saved = await loadRootConfig(h.controls.configPath);
+    expect(saved?.profiles.claude?.preferences).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'high',
+    });
+    const updateRequests = JSON.stringify(h.channel.rawClient.requests);
+    expect(updateRequests).toContain('推理强度');
+    expect(updateRequests).toContain('High');
+    expect(h.controls.exit).not.toHaveBeenCalled();
+  });
 });
 
 async function createHarness(): Promise<Harness> {

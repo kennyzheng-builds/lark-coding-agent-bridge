@@ -113,6 +113,8 @@ describe('comment run flow', () => {
       agentTexts: ['first answer', 'second answer', 'third answer'],
       threadIds: ['thread-one', 'thread-two', 'thread-three'],
     });
+    h.profileConfig.preferences.model = 'gpt-5.6-sol';
+    h.profileConfig.preferences.reasoningEffort = 'ultra';
 
     await handleCommentMention(h.deps(event({ commentId: 'comment-1', replyId: 'reply-1' })));
     await handleCommentMention(h.deps(event({ commentId: 'comment-2', replyId: 'reply-2' })));
@@ -122,6 +124,10 @@ describe('comment run flow', () => {
     expect(h.agent.runOptions[0]?.threadId).toBeUndefined();
     expect(h.agent.runOptions[1]?.threadId).toBe('thread-one');
     expect(h.agent.runOptions[2]?.threadId).toBe('thread-two');
+    expect(h.agent.runOptions[0]).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'ultra',
+    });
   });
 
   it('keeps Codex pre-tool progress text out of every comment reply', async () => {

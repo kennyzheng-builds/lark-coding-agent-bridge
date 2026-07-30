@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCapability } from '../../../src/agent/capability';
+import { claudeCapability, codexCapability } from '../../../src/agent/capability';
 import { ActiveRuns } from '../../../src/bot/active-runs';
 import { startRunFlow } from '../../../src/bot/run-flow';
 import { ProcessPool } from '../../../src/bot/process-pool';
@@ -98,6 +98,34 @@ describe('IM run flow', () => {
     if (!result.ok) throw new Error('expected run flow to start');
     expect(result.cwdRealpath).toBe(workspaceRealpath);
     expect(h.agent.runOptions[0]?.cwd).toBe(workspaceRealpath);
+  });
+
+  it('forwards the Codex profile model and reasoning effort to every IM run', async () => {
+    const h = await createHarness({ defaultWorkspace: true });
+    h.profileConfig.agentKind = 'codex';
+    h.profileConfig.codex = { binaryPath: 'codex' };
+    h.profileConfig.preferences.model = 'gpt-5.6-sol';
+    h.profileConfig.preferences.reasoningEffort = 'high';
+
+    const result = await startRunFlow({
+      scopeId: 'chat-1',
+      scope: { source: 'im', chatId: 'chat-1', actorId: 'ou_user' },
+      prompt: 'hello',
+      attachments: [],
+      access: { ok: true, reason: 'allowed-user' },
+      capability: codexCapability(h.profileConfig),
+      profileConfig: h.profileConfig,
+      sessions: h.sessions,
+      workspaces: h.workspaces,
+      executor: h.executor,
+      now: 1000,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(h.agent.runOptions[0]).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'high',
+    });
   });
 
 });

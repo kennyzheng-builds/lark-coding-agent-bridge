@@ -4,7 +4,20 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { claudeCapability, codexCapability } from '../agent/capability';
-import { DEFAULT_MODEL, modelLabel, normalizeModelSelection, supportedModels } from '../agent/models';
+import {
+  DEFAULT_MODEL,
+  modelLabel,
+  normalizeModelSelection,
+  resolveModelArg,
+  supportedModels,
+} from '../agent/models';
+import {
+  DEFAULT_REASONING_EFFORT,
+  isReasoningEffortSelection,
+  normalizeReasoningEffortSelection,
+  resolveReasoningEffortArg,
+  type ModelReasoningEffort,
+} from '../agent/reasoning-effort';
 import type { AgentAdapter } from '../agent/types';
 import type { ActiveRuns } from '../bot/active-runs';
 import {
@@ -1188,6 +1201,14 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       scopeId: `${ctx.scope}:doctor`,
       policy,
       nowait: true,
+      model: resolveModelArg(
+        ctx.controls.profileConfig.agentKind,
+        ctx.controls.profileConfig.preferences.model,
+      ),
+      reasoningEffort: resolveReasoningEffortArg(
+        ctx.controls.profileConfig.agentKind,
+        ctx.controls.profileConfig.preferences.reasoningEffort,
+      ),
       stopGraceMs: getAgentStopGraceMs(ctx.controls.cfg),
       observability: {
         profile: ctx.controls.profile,
@@ -2311,6 +2332,9 @@ async function handleModel(args: string, ctx: CommandContext): Promise<void> {
   const agentKind = ctx.controls.profileConfig.agentKind;
   const models = supportedModels(agentKind);
   const current = normalizeModelSelection(agentKind, ctx.controls.cfg.preferences?.model);
+  const currentReasoningEffort = normalizeReasoningEffortSelection(
+    ctx.controls.cfg.preferences?.reasoningEffort,
+  );
   const sub = args.trim();
 
   // Card action: the picker's 切换 button submitted a dropdown selection. Update the picker
@@ -2318,19 +2342,44 @@ async function handleModel(args: string, ctx: CommandContext): Promise<void> {
   if (ctx.fromCardAction && sub.toLowerCase().startsWith('submit')) {
     const picked = String((ctx.formValue ?? {}).model ?? '').trim();
     const model = !picked || picked === DEFAULT_MODEL ? undefined : picked;
-    await setModelPref(ctx, model);
-    log.info('command', 'model-set', { profile: ctx.controls.profile, model: model ?? 'default', via: 'card' });
+    const pickedReasoningEffort = String(
+      (ctx.formValue ?? {}).reasoning_effort ?? '',
+    ).trim();
+    const reasoningEffortSelection = isReasoningEffortSelection(
+      pickedReasoningEffort,
+    )
+      ? pickedReasoningEffort
+      : currentReasoningEffort;
+    const reasoningEffort =
+      reasoningEffortSelection === DEFAULT_REASONING_EFFORT
+        ? undefined
+        : reasoningEffortSelection;
+    await setModelPref(ctx, model, reasoningEffort, agentKind === 'codex');
+    log.info('command', 'model-set', {
+      profile: ctx.controls.profile,
+      model: model ?? 'default',
+      reasoningEffort: reasoningEffort ?? 'default',
+      via: 'card',
+    });
     await updateManagedCard(
       ctx.channel,
       ctx.msg.messageId,
-      modelSavedCard({ agentKind, model: picked || DEFAULT_MODEL }),
+      modelSavedCard({
+        agentKind,
+        model: picked || DEFAULT_MODEL,
+        reasoningEffort: reasoningEffortSelection,
+      }),
     ).catch(() => {});
     return;
   }
 
   // `/model` or `/model status` → interactive picker card (a dropdown, like /config).
   if (sub === '' || sub.toLowerCase() === 'status') {
-    const card = modelFormCard({ agentKind, model: current });
+    const card = modelFormCard({
+      agentKind,
+      model: current,
+      reasoningEffort: currentReasoningEffort,
+    });
     await sendManagedCard(ctx.channel, ctx.msg.chatId, card, commandReplyOptions(ctx));
     return;
   }
@@ -2350,13 +2399,22 @@ async function handleModel(args: string, ctx: CommandContext): Promise<void> {
 }
 
 /** Persist a profile's `preferences.model` (undefined = follow CLI default). Applies live. */
-async function setModelPref(ctx: CommandContext, model: string | undefined): Promise<void> {
+async function setModelPref(
+  ctx: CommandContext,
+  model: string | undefined,
+  reasoningEffort?: ModelReasoningEffort,
+  updateReasoningEffort = false,
+): Promise<void> {
   await withConfigFileLock(ctx.controls.configPath, async () => {
     const root = await loadRootConfig(ctx.controls.configPath);
     const setModel = (prefs: AppPreferences): AppPreferences => {
       const next = { ...prefs };
       if (model === undefined) delete next.model;
       else next.model = model;
+      if (updateReasoningEffort) {
+        if (reasoningEffort === undefined) delete next.reasoningEffort;
+        else next.reasoningEffort = reasoningEffort;
+      }
       return next;
     };
     if (!root) {

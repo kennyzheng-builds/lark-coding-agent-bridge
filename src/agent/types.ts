@@ -1,5 +1,6 @@
 import type { AgentAvailability } from './preflight';
 import type { ClaudePermissionMode, CodexSandboxMode } from '../config/permissions';
+import type { ModelReasoningEffort } from './reasoning-effort';
 
 export type { ClaudePermissionMode } from '../config/permissions';
 
@@ -34,6 +35,7 @@ export interface AgentRunOptions {
   sessionId?: string;
   threadId?: string;
   model?: string;
+  reasoningEffort?: ModelReasoningEffort;
   images?: readonly string[];
   sandbox?: CodexSandboxMode;
   permissionMode?: ClaudePermissionMode;

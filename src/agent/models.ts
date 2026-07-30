@@ -39,6 +39,7 @@ const CLAUDE_MODELS: ModelOption[] = [
 /** Codex CLI models. Forwarded to `codex exec --model`. */
 const CODEX_MODELS: ModelOption[] = [
   { value: DEFAULT_MODEL, label: '跟随默认（不指定）' },
+  { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
   { value: 'gpt-5-codex', label: 'GPT-5 Codex' },
   { value: 'gpt-5', label: 'GPT-5' },
   { value: 'o3', label: 'o3' },

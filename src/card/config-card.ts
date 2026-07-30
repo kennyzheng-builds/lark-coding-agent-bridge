@@ -1,4 +1,9 @@
 import { modelLabel, supportedModels } from '../agent/models';
+import {
+  reasoningEffortLabel,
+  reasoningEffortOptions,
+  type ReasoningEffortSelection,
+} from '../agent/reasoning-effort';
 import type { KnownChat } from '../bot/lark-info';
 import type { AgentKind, LarkCliIdentityPreset } from '../config/profile-schema';
 import type { CotMessagesMode, MessageReplyMode } from '../config/schema';
@@ -282,25 +287,56 @@ export function configFormCard(opts: ConfigFormOpts): object {
   };
 }
 
-/** Focused picker card for `/model` — a single model dropdown + a 切换 button. */
-export function modelFormCard(opts: { agentKind: AgentKind; model: string }): object {
+/** Focused picker card for `/model` — model + Codex effort in one form. */
+export function modelFormCard(opts: {
+  agentKind: AgentKind;
+  model: string;
+  reasoningEffort: ReasoningEffortSelection;
+}): object {
+  const effortElements =
+    opts.agentKind === 'codex'
+      ? [
+          {
+            tag: 'markdown',
+            content:
+              '**推理强度**\n' +
+              '_强度越高，复杂任务通常更稳，但耗时和 token 消耗也会增加；实际支持档位由模型决定。_',
+          },
+          {
+            tag: 'select_static',
+            name: 'reasoning_effort',
+            initial_option: opts.reasoningEffort,
+            options: reasoningEffortOptions().map((effort) => ({
+              text: { tag: 'plain_text', content: effort.label },
+              value: effort.value,
+            })),
+          },
+        ]
+      : [];
   return {
     schema: '2.0',
-    config: { summary: { content: '选择模型' } },
+    config: { summary: { content: '选择模型与强度' } },
     body: {
       elements: [
         {
           tag: 'markdown',
           content:
-            '🧠 **切换模型**\n\n' +
-            `当前：**${modelLabel(opts.agentKind, opts.model)}**（runtime: ${opts.agentKind}）\n` +
-            '下拉选一个、点「切换」即可（立即生效，下一条消息就用新模型）。',
+            '🧠 **切换模型与强度**\n\n' +
+            `当前模型：**${modelLabel(opts.agentKind, opts.model)}**（runtime: ${opts.agentKind}）\n` +
+            (opts.agentKind === 'codex'
+              ? `当前强度：**${reasoningEffortLabel(opts.reasoningEffort)}**\n`
+              : '') +
+            '选择后点「切换」（立即生效，下一条消息使用新设置）。',
         },
         { tag: 'hr' },
         {
           tag: 'form',
           name: 'model_form',
           elements: [
+            {
+              tag: 'markdown',
+              content: '**模型**',
+            },
             {
               tag: 'select_static',
               name: 'model',
@@ -310,6 +346,7 @@ export function modelFormCard(opts: { agentKind: AgentKind; model: string }): ob
                 value: m.value,
               })),
             },
+            ...effortElements,
             {
               tag: 'button',
               name: 'model_submit',
@@ -326,16 +363,24 @@ export function modelFormCard(opts: { agentKind: AgentKind; model: string }): ob
 }
 
 /** Done-state card for `/model` — replaces the picker in place after a selection. */
-export function modelSavedCard(opts: { agentKind: AgentKind; model: string }): object {
+export function modelSavedCard(opts: {
+  agentKind: AgentKind;
+  model: string;
+  reasoningEffort: ReasoningEffortSelection;
+}): object {
+  const effortSummary =
+    opts.agentKind === 'codex'
+      ? `\n推理强度：**${reasoningEffortLabel(opts.reasoningEffort)}**`
+      : '';
   return {
     schema: '2.0',
-    config: { summary: { content: '模型已切换' } },
+    config: { summary: { content: '模型与强度已切换' } },
     body: {
       elements: [
         {
           tag: 'markdown',
           content:
-            `✅ **模型已切到 ${modelLabel(opts.agentKind, opts.model)}**\n\n` +
+            `✅ 模型：**${modelLabel(opts.agentKind, opts.model)}**${effortSummary}\n\n` +
             '下一条消息生效。再发 `/model` 可重新选择。',
         },
       ],

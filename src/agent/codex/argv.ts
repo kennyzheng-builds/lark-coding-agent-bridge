@@ -1,4 +1,8 @@
 import type { SandboxMode } from '../../config/profile-schema';
+import {
+  isModelReasoningEffort,
+  type ModelReasoningEffort,
+} from '../reasoning-effort';
 
 export interface BuildCodexArgsInput {
   cwd: string;
@@ -9,6 +13,8 @@ export interface BuildCodexArgsInput {
   ignoreRules?: boolean;
   /** Forwarded to `codex exec --model`. Omitted uses the Codex default. */
   model?: string;
+  /** Forwarded as a config override. Omitted uses the Codex default. */
+  reasoningEffort?: ModelReasoningEffort;
 }
 
 export function buildCodexArgs(input: BuildCodexArgsInput): string[] {
@@ -19,11 +25,20 @@ export function buildCodexArgs(input: BuildCodexArgsInput): string[] {
   ) {
     throw new Error(`unsafe sandbox mode: ${input.sandbox}`);
   }
+  if (
+    input.reasoningEffort !== undefined &&
+    !isModelReasoningEffort(input.reasoningEffort)
+  ) {
+    throw new Error(`unsafe reasoning effort: ${String(input.reasoningEffort)}`);
+  }
 
   const globalFlags = [
     '--sandbox',
     input.sandbox,
     ...(input.model ? ['--model', input.model] : []),
+    ...(input.reasoningEffort
+      ? ['-c', `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`]
+      : []),
     '-c',
     'approval_policy="never"',
     '-c',

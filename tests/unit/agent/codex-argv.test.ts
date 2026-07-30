@@ -126,6 +126,35 @@ describe('Codex argv contract', () => {
     expect(buildCodexArgs({ cwd: '/repo', sandbox: 'read-only' })).not.toContain('--model');
   });
 
+  it('forwards reasoning effort as a global Codex config override', () => {
+    const args = buildCodexArgs({
+      cwd: '/repo',
+      sandbox: 'workspace-write',
+      threadId: 'thread-123',
+      reasoningEffort: 'high',
+    });
+    const effortConfigIdx = args.indexOf('model_reasoning_effort="high"');
+    expect(effortConfigIdx).toBeGreaterThan(0);
+    expect(args[effortConfigIdx - 1]).toBe('-c');
+    expect(effortConfigIdx).toBeLessThan(args.indexOf('resume'));
+  });
+
+  it('omits reasoning effort when the profile follows the Codex default', () => {
+    expect(
+      buildCodexArgs({ cwd: '/repo', sandbox: 'read-only' }).join(' '),
+    ).not.toContain('model_reasoning_effort');
+  });
+
+  it('rejects an unrecognized reasoning effort before spawning Codex', () => {
+    expect(() =>
+      buildCodexArgs({
+        cwd: '/repo',
+        sandbox: 'read-only',
+        reasoningEffort: 'turbo' as 'high',
+      }),
+    ).toThrow('unsafe reasoning effort');
+  });
+
   it('can explicitly ignore the user config when profile isolation asks for it', () => {
     expect(
       buildCodexArgs({

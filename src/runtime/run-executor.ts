@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ModelReasoningEffort } from '../agent/reasoning-effort';
 import type { AgentAdapter, AgentEvent, AgentRun } from '../agent/types';
 import { ActiveRuns, type RunHandle } from '../bot/active-runs';
 import { ProcessPool } from '../bot/process-pool';
@@ -21,6 +22,7 @@ export interface SubmitRunInput {
   sessionId?: string;
   threadId?: string;
   model?: string;
+  reasoningEffort?: ModelReasoningEffort;
   images?: readonly string[];
   stopGraceMs?: number;
   nowait?: boolean;
@@ -100,6 +102,7 @@ export class RunExecutor {
       sessionId: input.sessionId,
       threadId: input.threadId,
       model: input.model,
+      reasoningEffort: input.reasoningEffort,
       images: input.images,
       sandbox: input.policy.sandbox,
       permissionMode: input.policy.permissionMode,
