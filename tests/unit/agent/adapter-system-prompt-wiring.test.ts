@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -112,6 +114,27 @@ describe('CodexAdapter system prompt wiring', () => {
 
     const stdin = await readAll(child.stdin);
     expect(stdin).toBe(prefixBridgeSystemPrompt('hi', undefined));
+  });
+
+  it('injects configured startup context files on every Codex turn', async () => {
+    const child = fakeChild();
+    spawnMock.spawnProcess.mockReturnValue(child);
+    const contextFile = join(tmpdir(), `codex-context-${process.pid}-${Date.now()}.md`);
+    writeFileSync(contextFile, 'current bootstrap state');
+    const adapter = new CodexAdapter({
+      binary: '/usr/local/bin/codex',
+      profileStateDir: '/tmp/codex-profile',
+      contextFiles: [contextFile, `${contextFile}.missing`],
+    });
+
+    adapter.run({ runId: 'r1', prompt: 'hi', cwd: '/tmp' });
+
+    const stdin = await readAll(child.stdin);
+    expect(stdin).toContain('## startup_context');
+    expect(stdin).toContain(`path=${JSON.stringify(contextFile)}`);
+    expect(stdin).toContain('current bootstrap state');
+    expect(stdin).toContain('## user_message\n\nhi');
+    rmSync(contextFile);
   });
 });
 

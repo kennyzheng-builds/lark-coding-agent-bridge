@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { readFileSync } from 'node:fs';
 import type { Readable, Writable } from 'node:stream';
 import { join } from 'node:path';
 import type { SandboxMode } from '../../config/profile-schema';
@@ -25,6 +26,7 @@ export interface CodexAdapterOptions {
   inheritCodexHome?: boolean;
   ignoreUserConfig?: boolean;
   ignoreRules?: boolean;
+  contextFiles?: readonly string[];
   sandbox?: SandboxMode;
   stopGraceMs?: number;
   larkChannel?: LarkChannelEnvContext;
@@ -42,6 +44,7 @@ export class CodexAdapter implements AgentAdapter {
   private readonly inheritCodexHome: boolean;
   private readonly ignoreUserConfig: boolean;
   private readonly ignoreRules: boolean;
+  private readonly contextFiles: readonly string[];
   private readonly sandbox: SandboxMode;
   private readonly defaultStopGraceMs: number;
   private readonly larkChannel: LarkChannelEnvContext | undefined;
@@ -54,6 +57,7 @@ export class CodexAdapter implements AgentAdapter {
     this.inheritCodexHome = opts.inheritCodexHome !== false;
     this.ignoreUserConfig = opts.ignoreUserConfig === true;
     this.ignoreRules = opts.ignoreRules !== false;
+    this.contextFiles = opts.contextFiles ?? [];
     this.sandbox = opts.sandbox ?? 'danger-full-access';
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.larkChannel = opts.larkChannel;
@@ -153,7 +157,14 @@ export class CodexAdapter implements AgentAdapter {
     child.stdin.on('error', (err) => {
       log.warn('agent', 'stdin-error', { message: err.message });
     });
-    child.stdin.end(prefixBridgeSystemPrompt(opts.prompt, this.botIdentity), 'utf8');
+    child.stdin.end(
+      prefixBridgeSystemPrompt(
+        opts.prompt,
+        this.botIdentity,
+        readStartupContext(this.contextFiles),
+      ),
+      'utf8',
+    );
 
     const stopGraceMs = opts.stopGraceMs ?? this.defaultStopGraceMs;
 
@@ -201,6 +212,24 @@ export class CodexAdapter implements AgentAdapter {
       },
     };
   }
+}
+
+export function readStartupContext(paths: readonly string[]): string | undefined {
+  const sections: string[] = [];
+  for (const path of paths) {
+    try {
+      const content = readFileSync(path, 'utf8').trim();
+      if (content) {
+        sections.push(`<context_file path=${JSON.stringify(path)}>\n${content}\n</context_file>`);
+      }
+    } catch (err) {
+      log.warn('agent', 'context-file-read-failed', {
+        path,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
 async function* createEventStream(

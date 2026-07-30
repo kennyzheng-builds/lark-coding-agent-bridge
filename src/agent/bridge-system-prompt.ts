@@ -143,6 +143,10 @@ export function buildBridgeSystemPrompt(identity: AgentBotIdentity | undefined):
 export function prefixBridgeSystemPrompt(
   prompt: string,
   identity: AgentBotIdentity | undefined,
+  startupContext?: string,
 ): string {
-  return `${buildBridgeSystemPrompt(identity)}\n\n## user_message\n\n${prompt}`;
+  const contextSection = startupContext
+    ? `\n\n## startup_context\n\n${startupContext}`
+    : '';
+  return `${buildBridgeSystemPrompt(identity)}${contextSection}\n\n## user_message\n\n${prompt}`;
 }

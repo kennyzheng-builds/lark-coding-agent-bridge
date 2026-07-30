@@ -42,6 +42,8 @@ export interface CodexConfig {
   inheritCodexHome?: boolean;
   ignoreUserConfig?: boolean;
   ignoreRules?: boolean;
+  /** Files whose current contents are injected before every Codex user turn. */
+  contextFiles?: string[];
 }
 
 export interface AttachmentConfig {
@@ -281,6 +283,7 @@ function normalizeCodex(input: CodexConfig & { flags?: unknown }): CodexConfig {
     inheritCodexHome: input.inheritCodexHome !== false,
     ignoreUserConfig: input.ignoreUserConfig === true,
     ignoreRules: input.ignoreRules !== false,
+    contextFiles: stringArray(input.contextFiles).filter(Boolean),
   };
   return codex;
 }

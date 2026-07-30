@@ -288,6 +288,23 @@ describe('profile schema', () => {
     expect(cfg.codex?.inheritCodexHome).toBe(false);
   });
 
+  it('normalizes Codex startup context files', () => {
+    const cfg = normalizeProfileConfig({
+      schemaVersion: 2,
+      agentKind: 'codex',
+      accounts: { app },
+      codex: {
+        binaryPath: '/usr/local/bin/codex',
+        contextFiles: ['/workspace/bootstrap.md', '', 42, '/workspace/progress.md'],
+      },
+    });
+
+    expect(cfg.codex?.contextFiles).toEqual([
+      '/workspace/bootstrap.md',
+      '/workspace/progress.md',
+    ]);
+  });
+
   it('defaults Claude permissions to full/full and derives legacy sandbox for runtime compatibility', () => {
     const cfg = createDefaultProfileConfig({
       agentKind: 'claude',
